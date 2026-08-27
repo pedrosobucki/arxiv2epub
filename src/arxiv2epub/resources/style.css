@@ -1,0 +1,267 @@
+/* Styling aimed at e-ink readers: generous leading, no fixed pixel sizes, and
+   nothing that depends on colour, since most Kindles are greyscale. */
+
+@namespace epub "http://www.idpf.org/2007/ops";
+
+html {
+  font-size: 100%;
+}
+
+body {
+  margin: 0 0.4em;
+  line-height: 1.5;
+  text-align: justify;
+  widows: 2;
+  orphans: 2;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+
+/* ---------------------------------------------------------------- headings */
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: bold;
+  line-height: 1.25;
+  text-align: left;
+  hyphens: none;
+  -webkit-hyphens: none;
+  page-break-after: avoid;
+  break-after: avoid;
+  margin: 1.4em 0 0.6em;
+}
+
+h1 { font-size: 1.5em; margin-top: 0; }
+h2 { font-size: 1.25em; }
+h3 { font-size: 1.1em; }
+h4, h5, h6 { font-size: 1em; }
+
+.ltx_tag { font-weight: bold; }
+
+/* ------------------------------------------------------------- title page */
+
+.titlepage { text-align: left; }
+
+.paper-title {
+  font-size: 1.7em;
+  line-height: 1.2;
+  margin: 1.5em 0 0.7em;
+}
+
+.titlepage .authors {
+  font-size: 1.05em;
+  font-style: italic;
+  text-align: left;
+  margin: 0 0 0.4em;
+}
+
+.paper-facts {
+  font-size: 0.85em;
+  text-align: left;
+  margin: 0 0 2em;
+}
+
+.abstract {
+  margin: 1.5em 0;
+  font-size: 0.95em;
+}
+
+.abstract h2 {
+  font-size: 0.9em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.colophon {
+  margin-top: 2.5em;
+  font-size: 0.8em;
+  text-align: left;
+}
+
+.colophon p { margin: 0.4em 0; }
+
+/* ------------------------------------------------------------ paragraphs */
+
+p, .ltx_p {
+  margin: 0;
+  text-indent: 1.2em;
+}
+
+/* The first paragraph after a heading or block starts flush left. */
+h1 + p, h2 + p, h3 + p, h4 + p, h5 + p, h6 + p,
+.ltx_para > p:first-child,
+.abstract p:first-of-type,
+div.equation-group + p,
+figure + p,
+p:first-child {
+  text-indent: 0;
+}
+
+.ltx_para { margin: 0 0 0.8em; }
+
+/* --------------------------------------------------------------- equations */
+
+img.math-inline, svg.math-inline {
+  display: inline-block;
+  margin: 0 0.05em;
+  max-width: 100%;
+}
+
+img.math-display, svg.math-display {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  height: auto;
+}
+
+.equation-group {
+  margin: 1.1em 0;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.equation {
+  margin: 0.5em 0;
+  text-align: center;
+  text-indent: 0;
+  position: relative;
+}
+
+.equation-number {
+  float: right;
+  font-size: 0.85em;
+  padding-left: 0.5em;
+}
+
+code.math-fallback {
+  font-family: monospace;
+  font-size: 0.9em;
+}
+
+/* ----------------------------------------------------------------- figures */
+
+figure, .ltx_figure, .ltx_table, .ltx_float {
+  margin: 1.4em 0;
+  text-align: center;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+img, .figure-image {
+  max-width: 100%;
+  height: auto;
+}
+
+figcaption, .ltx_caption {
+  font-size: 0.85em;
+  line-height: 1.4;
+  text-align: left;
+  text-indent: 0;
+  margin-top: 0.6em;
+}
+
+.ltx_caption .ltx_tag { font-weight: bold; }
+
+/* ------------------------------------------------------------------ tables */
+
+table, .ltx_tabular {
+  border-collapse: collapse;
+  margin: 0 auto;
+  font-size: 0.8em;
+  line-height: 1.35;
+}
+
+th, td, .ltx_td, .ltx_th {
+  padding: 0.25em 0.5em;
+  text-align: left;
+  text-indent: 0;
+  vertical-align: top;
+}
+
+th, .ltx_th { font-weight: bold; }
+
+.ltx_border_t, .ltx_border_tt { border-top: 1px solid currentColor; }
+.ltx_border_b, .ltx_border_bb { border-bottom: 1px solid currentColor; }
+.ltx_border_r { border-right: 1px solid currentColor; }
+.ltx_border_l { border-left: 1px solid currentColor; }
+
+.ltx_align_center, .ltx_align_middle { text-align: center; }
+.ltx_align_right { text-align: right; }
+.ltx_align_left { text-align: left; }
+
+/* ------------------------------------------------------------------- lists */
+
+ul, ol { margin: 0.7em 0; padding-left: 1.4em; }
+li, .ltx_item { margin: 0.3em 0; text-align: left; }
+li p { text-indent: 0; }
+
+/* -------------------------------------------------------------- code, misc */
+
+pre, .ltx_verbatim {
+  font-family: monospace;
+  font-size: 0.8em;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-align: left;
+  text-indent: 0;
+  margin: 1em 0;
+}
+
+code { font-family: monospace; font-size: 0.9em; }
+
+blockquote, .ltx_quote {
+  margin: 1em 1.2em;
+  font-size: 0.95em;
+}
+
+.ltx_font_italic, em, i { font-style: italic; }
+.ltx_font_bold, strong, b { font-weight: bold; }
+.ltx_font_typewriter { font-family: monospace; }
+.ltx_font_smallcaps { font-variant: small-caps; }
+
+hr { border: none; border-top: 1px solid currentColor; margin: 1.5em 20%; }
+
+a { text-decoration: none; }
+
+/* --------------------------------------------------------------- footnotes */
+
+a.noteref, .noteref sup { font-size: 0.75em; vertical-align: super; line-height: 0; }
+
+.footnotes {
+  margin-top: 2.5em;
+  font-size: 0.85em;
+  page-break-before: auto;
+}
+
+.footnotes h2 {
+  font-size: 0.9em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+aside.footnote { margin: 0.6em 0; }
+aside.footnote p { text-indent: 0; }
+.footnote-back { font-weight: bold; }
+
+/* ------------------------------------------------------------ bibliography */
+
+.ltx_bibliography ul, ul.ltx_biblist { padding-left: 0; list-style: none; }
+
+li.ltx_bibitem {
+  margin: 0.7em 0;
+  padding-left: 1.4em;
+  text-indent: -1.4em;
+  font-size: 0.9em;
+  text-align: left;
+}
+
+.ltx_bibblock { display: inline; }
+.ltx_bibtag, .ltx_tag_bibitem { font-weight: bold; }
+
+/* ------------------------------------------------------------------- table
+   of contents (the generated nav document) */
+
+nav#toc ol { list-style: none; padding-left: 0; margin: 0; }
+nav#toc ol ol { padding-left: 1.2em; font-size: 0.92em; }
+nav#toc li { margin: 0.45em 0; text-align: left; }
