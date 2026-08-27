@@ -1,0 +1,30 @@
+services:
+  arxiv2epub:
+    build: .
+    image: arxiv2epub:latest
+    volumes:
+      - ./out:/out
+      - ./cache:/cache
+    # Override at the command line:
+    #   docker compose run --rm arxiv2epub 1706.03762
+    command: ["--help"]
+    environment:
+      - TZ=UTC
+
+  # Convenience target for regenerating the sample papers used during
+  # development: docker compose run --rm samples
+  samples:
+    build: .
+    image: arxiv2epub:latest
+    volumes:
+      - ./out:/out
+      - ./cache:/cache
+    entrypoint: ["arxiv2epub"]
+    command:
+      - "--cache"
+      - "/cache"
+      - "-o"
+      - "/out"
+      - "1706.03762"   # Attention Is All You Need
+      - "2301.08243"   # I-JEPA (LeCun et al.)
+      - "2501.12948"   # DeepSeek-R1
