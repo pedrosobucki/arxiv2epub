@@ -190,6 +190,47 @@ def test_inline_svg_keeps_its_namespace(fetcher, paper_metadata) -> None:
     assert "viewBox" in book.chapters[1].body
 
 
+TIKZ_TEXT_BOX = (
+    '<section class="ltx_section" id="S1"><h2>1</h2>'
+    '<div class="ltx_para"><span class="ltx_inline-block">'
+    '<svg class="ltx_picture" viewBox="0 0 100 50">'
+    '<path d="M 0 0 L 1 1"/><path d="M 1 1 L 2 2"/>'
+    "<foreignObject><span>%s</span></foreignObject></svg>"
+    "</span></div></section>"
+)
+
+
+def test_prose_trapped_in_a_tikz_frame_is_lifted_out(fetcher, paper_metadata) -> None:
+    prose = "A prompt template that a reader actually needs. " * 5
+    book = _build(TIKZ_TEXT_BOX % prose, fetcher, paper_metadata)
+    soup = _soup(book.chapters[1])
+    assert soup.find("svg") is None
+    assert prose.strip() in soup.find(class_="text-box").get_text()
+
+
+def test_the_lifted_text_stays_valid_inside_an_inline_wrapper(
+    fetcher, paper_metadata
+) -> None:
+    # The drawing sat inside a <span>, where a <div> would not be allowed.
+    book = _build(TIKZ_TEXT_BOX % ("Long prose. " * 20), fetcher, paper_metadata)
+    assert _soup(book.chapters[1]).find(class_="text-box").name == "span"
+
+
+def test_a_drawing_with_a_short_label_stays_a_drawing(fetcher, paper_metadata) -> None:
+    book = _build(TIKZ_TEXT_BOX % "x axis", fetcher, paper_metadata)
+    soup = _soup(book.chapters[1])
+    assert soup.find("svg") is not None
+    assert soup.find(class_="text-box") is None
+
+
+def test_content_left_inside_a_foreign_object_is_namespaced(
+    fetcher, paper_metadata
+) -> None:
+    book = _build(TIKZ_TEXT_BOX % "x axis", fetcher, paper_metadata)
+    assert 'xmlns="http://www.w3.org/1999/xhtml"' in book.chapters[1].body
+    assert "foreignObject" in book.chapters[1].body
+
+
 def test_the_title_page_carries_the_metadata(fetcher, paper_metadata) -> None:
     book = _build(EQUATION_TABLE, fetcher, paper_metadata)
     titlepage = book.chapters[0].body

@@ -77,6 +77,16 @@ TOP_LEVEL_SECTION_CLASSES = (
 
 IMAGE_SUFFIXES = (".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp")
 
+SHAPE_TAGS = ["path", "line", "circle", "rect", "polyline", "polygon", "ellipse"]
+
+# A TikZ "text box" is a decorative frame drawn around prose: a prompt
+# template, a worked example, a callout. Below these thresholds the drawing is
+# just the frame, and the text inside it is the point.
+TEXT_BOX_MAX_SHAPES = 8
+TEXT_BOX_MIN_CHARACTERS = 120
+
+XHTML_NAMESPACE = "http://www.w3.org/1999/xhtml"
+
 _WHITESPACE = re.compile(r"\s+")
 _HEADING = re.compile(r"^h[1-6]$")
 
@@ -337,6 +347,9 @@ class Transformer:
     # -------------------------------------------------------------- processing
 
     def _process(self, root: Tag) -> None:
+        # Before the attribute clean, so text lifted out of a drawing is
+        # tidied along with everything else.
+        self._unwrap_svg_text_boxes(root)
         self._clean_attributes(root)
         self._namespace_svg(root)
         self._normalise_figures(root)
@@ -356,17 +369,48 @@ class Transformer:
                 ):
                     del node[attribute]
 
+    def _unwrap_svg_text_boxes(self, root: Tag) -> None:
+        """Lift prose out of decorative TikZ frames.
+
+        LaTeXML puts the text of a framed block inside ``<foreignObject>``,
+        which e-readers do not render at all -- the reader gets an empty grey
+        box where a prompt template should be. When the surrounding drawing is
+        only the frame, the text is worth more than the box.
+        """
+        for svg in root.find_all("svg"):
+            objects = svg.find_all("foreignobject")
+            if not objects:
+                continue
+            characters = sum(len(_text(node)) for node in objects)
+            shapes = len(svg.find_all(SHAPE_TAGS))
+            if characters < TEXT_BOX_MIN_CHARACTERS or shapes > TEXT_BOX_MAX_SHAPES:
+                continue
+
+            # A span, not a div: the drawing it replaces often sits inside an
+            # inline wrapper, where a block element would be invalid. CSS
+            # gives it block layout.
+            replacement = self._tag("span", class_="text-box")
+            for node in objects:
+                for child in list(node.contents):
+                    replacement.append(child.extract())
+            svg.replace_with(replacement)
+
     @staticmethod
     def _namespace_svg(root: Tag) -> None:
-        """Re-declare the SVG namespace an HTML parser dropped.
+        """Re-declare the namespaces an HTML parser dropped.
 
         Inline TikZ pictures arrive as ``<svg>``; without ``xmlns`` an EPUB
         reader parsing the file as XML sees an unknown HTML element instead.
+        Content left inside a ``<foreignObject>`` needs the same treatment in
+        reverse, since it is XHTML sitting inside an SVG subtree.
         """
         for node in root.find_all("svg"):
             if _inside_foreign_content(node):
                 continue
             node["xmlns"] = SVG_NAMESPACE
+            for embedded in node.find_all("foreignobject"):
+                for child in _element_children(embedded):
+                    child["xmlns"] = XHTML_NAMESPACE
 
     @staticmethod
     def _normalise_figures(root: Tag) -> None:

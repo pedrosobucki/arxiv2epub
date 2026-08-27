@@ -22,6 +22,8 @@ log = logging.getLogger(__name__)
 # A LaTeXML run that failed still returns a page; real papers are far larger.
 _MIN_CONTENT_CHARS = 2000
 
+PROVIDERS = ("auto", "arxiv", "ar5iv")
+
 
 class NoHtmlAvailable(RuntimeError):
     """Raised when neither arXiv nor ar5iv can supply HTML for a paper."""
@@ -41,13 +43,21 @@ class HtmlSource:
         return urljoin(self.url, ".")
 
 
-def candidate_urls(arxiv_id: ArxivId) -> list[tuple[str, str]]:
+def candidate_urls(
+    arxiv_id: ArxivId, provider: str = "auto"
+) -> list[tuple[str, str]]:
     """Return ``(provider, url)`` pairs to try, best rendering first."""
+    if provider not in PROVIDERS:
+        raise ValueError(f"unknown provider {provider!r}; expected one of {PROVIDERS}")
+
     candidates: list[tuple[str, str]] = []
     if arxiv_id.version:
         candidates.append(("arxiv", f"https://arxiv.org/html/{arxiv_id.versioned}"))
     candidates.append(("arxiv", f"https://arxiv.org/html/{arxiv_id.bare}"))
     candidates.append(("ar5iv", f"https://ar5iv.labs.arxiv.org/html/{arxiv_id.bare}"))
+
+    if provider != "auto":
+        candidates = [c for c in candidates if c[0] == provider]
     # Drop duplicates while preserving order.
     seen: set[str] = set()
     return [c for c in candidates if not (c[1] in seen or seen.add(c[1]))]
@@ -64,10 +74,12 @@ def looks_like_a_paper(html: str) -> bool:
     return len(article.get_text(" ", strip=True)) >= _MIN_CONTENT_CHARS
 
 
-def resolve(arxiv_id: ArxivId, fetcher: Fetcher) -> HtmlSource:
+def resolve(
+    arxiv_id: ArxivId, fetcher: Fetcher, wanted: str = "auto"
+) -> HtmlSource:
     """Fetch the best available HTML rendering of a paper."""
     attempts: list[str] = []
-    for provider, url in candidate_urls(arxiv_id):
+    for provider, url in candidate_urls(arxiv_id, wanted):
         try:
             body, resolved_url = fetcher.get(url)
         except Exception as exc:  # noqa: BLE001 - any failure means "try the next one"
@@ -84,4 +96,5 @@ def resolve(arxiv_id: ArxivId, fetcher: Fetcher) -> HtmlSource:
     raise NoHtmlAvailable(
         f"no HTML rendering of {arxiv_id.bare} could be fetched; tried: "
         + "; ".join(attempts)
+        + f". The paper itself is at {arxiv_id.abs_url}"
     )

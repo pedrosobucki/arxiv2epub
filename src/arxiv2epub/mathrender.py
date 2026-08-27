@@ -31,6 +31,10 @@ ziamath.config.precision = 2
 # multiple of it, so the value itself never reaches the output.
 _RENDER_SIZE = 24.0
 
+# Padding ziamath leaves around the glyphs so nothing clips at the SVG edge.
+# It has to come back out of the baseline offset, or inline maths sits low.
+_RENDER_MARGIN = 1.0
+
 _VIEWBOX = re.compile(r"\s+")
 
 # Attributes LaTeXML adds for cross-referencing that ziamath does not understand.
@@ -98,7 +102,7 @@ def _geometry(svg: str) -> tuple[float, float, float]:
         float(value) for value in _VIEWBOX.split(view_box.strip())
     )
     del min_x
-    depth = min_y + box_height
+    depth = min_y + box_height - _RENDER_MARGIN
     return (
         box_width / _RENDER_SIZE,
         box_height / _RENDER_SIZE,
@@ -109,14 +113,16 @@ def _geometry(svg: str) -> tuple[float, float, float]:
 def _draw(mathml: str, latex: str, color: str | None) -> str:
     """Draw MathML, falling back to the TeX annotation when that fails."""
     try:
-        drawing = ziamath.Math(mathml, size=_RENDER_SIZE)
+        drawing = ziamath.Math(mathml, size=_RENDER_SIZE, margin=_RENDER_MARGIN)
         return drawing.svg()
     except Exception as mathml_error:  # noqa: BLE001 - backend raises many types
         if not latex:
             raise MathRenderError(f"could not draw MathML: {mathml_error}") from None
         log.debug("MathML draw failed (%s); retrying from TeX", mathml_error)
         try:
-            drawing = ziamath.Latex(latex, size=_RENDER_SIZE, color=color)
+            drawing = ziamath.Latex(
+                latex, size=_RENDER_SIZE, color=color, margin=_RENDER_MARGIN
+            )
             return drawing.svg()
         except Exception as latex_error:  # noqa: BLE001
             raise MathRenderError(

@@ -40,6 +40,7 @@ h4, h5, h6 { font-size: 1em; }
 /* ------------------------------------------------------------- title page */
 
 .titlepage { text-align: left; }
+.titlepage p, .colophon p { text-indent: 0; }
 
 .paper-title {
   font-size: 1.7em;
@@ -81,22 +82,16 @@ h4, h5, h6 { font-size: 1em; }
 
 /* ------------------------------------------------------------ paragraphs */
 
+/* Block paragraphs rather than first-line indents: LaTeXML wraps each
+   paragraph in its own .ltx_para, so an indent rule would need an exception
+   for nearly every paragraph in the document. */
 p, .ltx_p {
-  margin: 0;
-  text-indent: 1.2em;
-}
-
-/* The first paragraph after a heading or block starts flush left. */
-h1 + p, h2 + p, h3 + p, h4 + p, h5 + p, h6 + p,
-.ltx_para > p:first-child,
-.abstract p:first-of-type,
-div.equation-group + p,
-figure + p,
-p:first-child {
+  margin: 0 0 0.8em;
   text-indent: 0;
 }
 
 .ltx_para { margin: 0 0 0.8em; }
+.ltx_para > p:last-child { margin-bottom: 0; }
 
 /* --------------------------------------------------------------- equations */
 
@@ -179,6 +174,10 @@ th, td, .ltx_td, .ltx_th {
 
 th, .ltx_th { font-weight: bold; }
 
+/* Row labels are headers structurally, but bolding a whole first column is
+   heavier than the paper ever intended. */
+.ltx_th_row { font-weight: normal; }
+
 .ltx_border_t, .ltx_border_tt { border-top: 1px solid currentColor; }
 .ltx_border_b, .ltx_border_bb { border-bottom: 1px solid currentColor; }
 .ltx_border_r { border-right: 1px solid currentColor; }
@@ -210,6 +209,27 @@ pre, .ltx_verbatim {
 
 code { font-family: monospace; font-size: 0.9em; }
 
+/* Prose lifted out of a TikZ frame; the frame is redrawn in CSS so it still
+   reads as a set-apart block. */
+.text-box {
+  display: block;
+  margin: 1.2em 0;
+  padding: 0.8em 1em;
+  border: 1px solid currentColor;
+  font-size: 0.9em;
+  text-align: left;
+}
+
+.text-box .ltx_p,
+.text-box .ltx_inline-block,
+.text-box .ltx_minipage {
+  display: block;
+  width: auto !important;
+  margin: 0 0 0.6em;
+}
+
+.text-box > :last-child { margin-bottom: 0; }
+
 blockquote, .ltx_quote {
   margin: 1em 1.2em;
   font-size: 0.95em;
@@ -226,7 +246,10 @@ a { text-decoration: none; }
 
 /* --------------------------------------------------------------- footnotes */
 
-a.noteref, .noteref sup { font-size: 0.75em; vertical-align: super; line-height: 0; }
+/* Only the <sup> raises the marker; styling the link as well would lift it
+   twice and float it off the line. */
+a.noteref { font-size: inherit; vertical-align: baseline; }
+a.noteref sup { font-size: 0.75em; vertical-align: super; line-height: 0; }
 
 .footnotes {
   margin-top: 2.5em;

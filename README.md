@@ -24,6 +24,9 @@ Send-to-Kindle converter still reads it.
   mid-sentence asides LaTeXML emits.
 - **Working cross-references**: citations, figure numbers, and section links
   keep working after the paper is split across files.
+- **Prose rescued from TikZ frames.** LaTeXML puts the text of a framed block
+  inside `<foreignObject>`, which e-readers render as an empty grey box; where
+  the drawing is only the frame, the text is lifted out instead.
 - **A generated cover**, so a shelf of converted papers is browsable.
 - Full metadata — every author, the abstract as the description, arXiv
   categories as subjects, the DOI, and the exact version converted.
@@ -65,6 +68,7 @@ the paper; give it a path ending in `.epub` and that exact file is written.
 | `--math svg` | One SVG file per equation, deduplicated (default). |
 | `--math inline-svg` | SVG inlined into the text so equations follow the reader's text colour — better in dark mode, larger files. |
 | `--math png` | Raster equations, for readers that will not draw SVG. |
+| `--source arxiv\|ar5iv` | Force one HTML provider instead of taking whichever answers first. |
 | `--cache DIR` | Reuse downloaded pages and figures between runs. |
 | `--no-images` | Skip figures entirely. |
 | `--no-cover` | Skip the generated cover. |
@@ -125,7 +129,8 @@ raising for recoverable problems like one missing figure.
 
 - Papers with no HTML rendering on either arXiv or ar5iv cannot be converted;
   there is no PDF fallback, because reflowing two-column PDF text produces a
-  worse book than not producing one.
+  worse book than not producing one. This mostly affects pre-2000 submissions
+  whose original TeX defeats LaTeXML — `hep-th/9711200`, for instance.
 - Very wide tables are shrunk but not restructured, and can still be cramped on
   a small screen.
 - External SVG equations render in the reader's image layer, so on a device in

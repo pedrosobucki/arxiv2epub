@@ -11,7 +11,7 @@ from . import __version__
 from .ids import NotAnArxivReference
 from .mathrender import MATH_FORMATS
 from .pipeline import Options, build_epub
-from .sources import NoHtmlAvailable
+from .sources import PROVIDERS, NoHtmlAvailable
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,6 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
         dest="math_format",
         help="how to render equations: svg files (default), svg inlined into the "
         "text so it follows the reader's text colour, or png",
+    )
+    parser.add_argument(
+        "--source",
+        choices=PROVIDERS,
+        default="auto",
+        dest="provider",
+        help="which HTML rendering to use: arxiv.org, ar5iv, or whichever "
+        "answers first (default: auto)",
     )
     parser.add_argument(
         "--no-cover", action="store_true", help="skip the generated cover image"
@@ -71,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
 
     options = Options(
         math_format=args.math_format,
+        provider=args.provider,
         include_cover=not args.no_cover,
         download_images=not args.no_images,
         cache_dir=args.cache,

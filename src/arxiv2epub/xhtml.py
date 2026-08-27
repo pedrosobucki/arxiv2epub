@@ -75,7 +75,49 @@ SVG_ATTRIBUTE_CASE = {
     "zoomandpan": "zoomAndPan",
 }
 
+# SVG element names an HTML parser also lower-cases. Unlike the attributes,
+# none of these collide with an HTML tag, so restoring them is unambiguous.
+SVG_TAG_CASE = {
+    "altglyph": "altGlyph",
+    "altglyphdef": "altGlyphDef",
+    "altglyphitem": "altGlyphItem",
+    "animatecolor": "animateColor",
+    "animatemotion": "animateMotion",
+    "animatetransform": "animateTransform",
+    "clippath": "clipPath",
+    "feblend": "feBlend",
+    "fecolormatrix": "feColorMatrix",
+    "fecomponenttransfer": "feComponentTransfer",
+    "fecomposite": "feComposite",
+    "feconvolvematrix": "feConvolveMatrix",
+    "fediffuselighting": "feDiffuseLighting",
+    "fedisplacementmap": "feDisplacementMap",
+    "fedistantlight": "feDistantLight",
+    "feflood": "feFlood",
+    "fefunca": "feFuncA",
+    "fefuncb": "feFuncB",
+    "fefuncg": "feFuncG",
+    "fefuncr": "feFuncR",
+    "fegaussianblur": "feGaussianBlur",
+    "feimage": "feImage",
+    "femerge": "feMerge",
+    "femergenode": "feMergeNode",
+    "femorphology": "feMorphology",
+    "feoffset": "feOffset",
+    "fepointlight": "fePointLight",
+    "fespecularlighting": "feSpecularLighting",
+    "fespotlight": "feSpotLight",
+    "fetile": "feTile",
+    "feturbulence": "feTurbulence",
+    "foreignobject": "foreignObject",
+    "glyphref": "glyphRef",
+    "lineargradient": "linearGradient",
+    "radialgradient": "radialGradient",
+    "textpath": "textPath",
+}
+
 _ATTRIBUTE = re.compile(r'(?<=[\s"])([a-z]+)=', re.ASCII)
+_TAG = re.compile(r"<(/?)(" + "|".join(SVG_TAG_CASE) + r")(?=[\s/>])", re.ASCII)
 
 XHTML_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
@@ -93,14 +135,21 @@ xml:lang="{lang}" lang="{lang}">
 """
 
 
-def restore_svg_attribute_case(markup: str) -> str:
-    """Put the camelCase back into SVG attribute names."""
+def restore_svg_case(markup: str) -> str:
+    """Put the camelCase back into SVG element and attribute names.
 
-    def replace(match: re.Match[str]) -> str:
+    An HTML parser lower-cases both, which turns ``viewBox`` into an unknown
+    attribute and ``foreignObject`` into an unknown element.
+    """
+
+    def attribute(match: re.Match[str]) -> str:
         name = match.group(1)
         return f"{SVG_ATTRIBUTE_CASE.get(name, name)}="
 
-    return _ATTRIBUTE.sub(replace, markup)
+    def tag(match: re.Match[str]) -> str:
+        return f"<{match.group(1)}{SVG_TAG_CASE[match.group(2)]}"
+
+    return _TAG.sub(tag, _ATTRIBUTE.sub(attribute, markup))
 
 
 def escape(text: str) -> str:
@@ -114,12 +163,12 @@ def escape(text: str) -> str:
 
 def serialize(tag: Tag) -> str:
     """Render a tag, and everything inside it, as XHTML."""
-    return restore_svg_attribute_case(tag.decode(formatter="minimal"))
+    return restore_svg_case(tag.decode(formatter="minimal"))
 
 
 def serialize_children(tag: Tag) -> str:
     """Render a tag's contents as XHTML."""
-    return restore_svg_attribute_case(tag.decode_contents(formatter="minimal"))
+    return restore_svg_case(tag.decode_contents(formatter="minimal"))
 
 
 def parse_fragment(markup: str) -> Tag:

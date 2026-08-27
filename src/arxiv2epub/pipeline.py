@@ -23,6 +23,7 @@ class Options:
     """Knobs the CLI exposes."""
 
     math_format: str = "svg"
+    provider: str = "auto"
     include_cover: bool = True
     download_images: bool = True
     cache_dir: Path | None = None
@@ -72,7 +73,7 @@ def build_epub(
     meta = metadata_module.fetch(arxiv_id, fetcher)
     log.info("found %r by %s", meta.title, meta.author_line)
 
-    source = sources.resolve(meta.arxiv_id, fetcher)
+    source = sources.resolve(meta.arxiv_id, fetcher, options.provider)
     math = MathRenderer(output_format=options.math_format)
     book = transform(
         source, meta, fetcher, math, download_images=options.download_images

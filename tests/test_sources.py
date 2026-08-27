@@ -52,3 +52,18 @@ def test_an_empty_rendering_falls_through_to_the_next_provider() -> None:
 def test_exhausting_every_provider_says_what_was_tried() -> None:
     with pytest.raises(NoHtmlAvailable, match="ar5iv"):
         resolve(ArxivId("1706.03762"), StubFetcher())
+
+
+def test_a_provider_can_be_forced() -> None:
+    only = candidate_urls(ArxivId("1706.03762", 7), "ar5iv")
+    assert [provider for provider, _ in only] == ["ar5iv"]
+
+
+def test_an_unknown_provider_is_rejected_up_front() -> None:
+    with pytest.raises(ValueError, match="unknown provider"):
+        candidate_urls(ArxivId("1706.03762"), "pdf")
+
+
+def test_the_failure_says_where_to_find_the_paper() -> None:
+    with pytest.raises(NoHtmlAvailable, match="arxiv.org/abs/1706.03762"):
+        resolve(ArxivId("1706.03762"), StubFetcher())
