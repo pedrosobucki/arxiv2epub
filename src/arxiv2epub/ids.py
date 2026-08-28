@@ -85,22 +85,54 @@ def parse(reference: str) -> ArxivId:
     raise NotAnArxivReference(f"could not find an arXiv id in {reference!r}")
 
 
-def find_in_text(text: str) -> ArxivId | None:
-    """Pick an arXiv reference out of free-form prose, or return None.
+def find_all_in_text(text: str) -> list[ArxivId]:
+    """Pick every arXiv reference out of free-form prose, in order.
 
-    Used on incoming mail, where the id is surrounded by whatever the sender
-    (or their mail client) wrapped around it.
+    Used on incoming mail, where ids are surrounded by whatever the sender (or
+    their mail client) wrapped around them. A paper mentioned twice -- once as
+    a link and again as bare text, say -- is returned once.
+
+    Qualified forms are collected first. Only if none appear at all does the
+    bare-id pattern get a say, so a stray "1234.5678"-shaped string in a
+    signature cannot compete with real links.
     """
     if not text:
-        return None
+        return []
 
-    for pattern in _QUALIFIED:
-        for match in pattern.finditer(text):
-            try:
-                return parse(match.group(1))
-            except NotAnArxivReference:
-                continue
-    try:
-        return parse(text)
-    except NotAnArxivReference:
-        return None
+    found: list[ArxivId] = []
+    seen: set[str] = set()
+
+    def remember(candidate: str) -> None:
+        try:
+            reference = parse(candidate)
+        except NotAnArxivReference:
+            return
+        if reference.bare not in seen:
+            seen.add(reference.bare)
+            found.append(reference)
+
+    # Sorted by position, not by pattern, so the papers come back in the order
+    # they were written rather than grouped by how they happened to be spelled.
+    qualified = sorted(
+        (match.start(), match.group(1))
+        for pattern in _QUALIFIED
+        for match in pattern.finditer(text)
+    )
+    for _, candidate in qualified:
+        remember(candidate)
+
+    if not found:
+        bare = sorted(
+            (match.start(), match.group(0))
+            for pattern in (_MODERN, _LEGACY)
+            for match in pattern.finditer(text)
+        )
+        for _, candidate in bare:
+            remember(candidate)
+    return found
+
+
+def find_in_text(text: str) -> ArxivId | None:
+    """Pick the first arXiv reference out of free-form prose, or return None."""
+    references = find_all_in_text(text)
+    return references[0] if references else None

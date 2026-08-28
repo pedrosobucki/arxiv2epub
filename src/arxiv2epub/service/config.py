@@ -15,6 +15,10 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
+# A forwarded digest can name dozens of papers. Converting every one of them
+# unprompted would flood both the Kindle and the mail server.
+DEFAULT_MAX_LINKS_PER_EMAIL = 10
+
 # Send-to-Kindle rejects oversized attachments, and most SMTP servers refuse
 # them well before that. Converted papers are ~1 MB, so anything near this is a
 # sign something has gone wrong.
@@ -45,6 +49,7 @@ class ServiceConfig:
     cache_dir: Path | None = None
     math_format: str = "svg"
     max_attachment_mb: float = DEFAULT_MAX_ATTACHMENT_MB
+    max_links_per_email: int = DEFAULT_MAX_LINKS_PER_EMAIL
     mailbox: str = "INBOX"
     dry_run: bool = False
     smtp_allow_cleartext: bool = False
@@ -135,6 +140,9 @@ def load_config(env_file: Path | str | None = None) -> ServiceConfig:
         cache_dir=Path(os.environ["CACHE_DIR"]) if os.environ.get("CACHE_DIR") else None,
         math_format=(os.environ.get("MATH_FORMAT") or "svg").strip(),
         max_attachment_mb=_number("MAX_ATTACHMENT_MB", DEFAULT_MAX_ATTACHMENT_MB),
+        max_links_per_email=max(
+            1, int(_number("MAX_LINKS_PER_EMAIL", DEFAULT_MAX_LINKS_PER_EMAIL))
+        ),
         mailbox=(os.environ.get("MAILBOX") or "INBOX").strip(),
         dry_run=_flag("DRY_RUN"),
         smtp_allow_cleartext=_flag("SMTP_ALLOW_CLEARTEXT"),

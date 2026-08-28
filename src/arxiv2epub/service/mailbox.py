@@ -19,7 +19,7 @@ import ssl
 from contextlib import contextmanager
 from dataclasses import dataclass
 from email.message import EmailMessage
-from email.utils import parseaddr
+from email.utils import formatdate, make_msgid, parseaddr
 from pathlib import Path
 from typing import Iterator
 
@@ -44,6 +44,7 @@ class IncomingMessage:
     sender: str
     subject: str
     body: str
+    message_id: str = ""
 
     @property
     def searchable(self) -> str:
@@ -175,6 +176,7 @@ class Mailbox:
                         sender=sender.strip().lower(),
                         subject=str(parsed.get("Subject") or ""),
                         body=_extract_body(parsed),
+                        message_id=str(parsed.get("Message-ID") or "").strip(),
                     )
                 )
         return messages
@@ -270,12 +272,27 @@ class Mailbox:
         subject: str,
         body: str,
         attachment: Path | None = None,
+        in_reply_to: str = "",
     ) -> None:
-        """Send one message, optionally carrying an EPUB."""
+        """Send one message, optionally carrying an EPUB.
+
+        ``in_reply_to`` threads the message onto the one that prompted it.
+        A reply to a conversation the recipient started reads as wanted mail;
+        an unsolicited message from a young domain reads as spam, which is
+        what a bare confirmation was being filed as.
+        """
         message = EmailMessage()
         message["From"] = self.config.email_user
         message["To"] = to
         message["Subject"] = subject
+        message["Date"] = formatdate(localtime=True)
+        message["Message-ID"] = make_msgid(domain=self.config.email_user.split("@")[-1])
+        if in_reply_to:
+            message["In-Reply-To"] = in_reply_to
+            message["References"] = in_reply_to
+            # RFC 3834: says plainly that a machine wrote this, and stops
+            # anything replying back to it.
+            message["Auto-Submitted"] = "auto-replied"
         message.set_content(body)
 
         if attachment is not None:

@@ -13,10 +13,10 @@ import logging
 import signal
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..ids import ArxivId, find_in_text
+from ..ids import ArxivId, find_all_in_text
 from ..pipeline import Options, Result, build_epub
 from ..sources import NoHtmlAvailable
 from .config import ServiceConfig
@@ -33,6 +33,43 @@ def _nothing():
     yield
 
 
+# One wording for each outcome, used in both the subject and the body so a
+# reply reads the same way whichever part of it you look at.
+LABELS = {
+    "sent": ("Sent", "sent"),
+    "duplicate": ("Already sent", "already sent"),
+    "unconvertible": ("Could not convert", "could not convert"),
+    "failed": ("Failed", "failed"),
+    "too-large": ("Too large to send", "too large to mail"),
+}
+
+
+@dataclass
+class Item:
+    """What became of one paper referenced in a message."""
+
+    reference: ArxivId
+    status: str
+    detail: str = ""
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def heading(self) -> str:
+        return LABELS.get(self.status, (self.status.capitalize(), ""))[0]
+
+    def line(self) -> str:
+        label = LABELS.get(self.status, ("", self.status))[1]
+        suffix = f" - {self.detail}" if self.detail else ""
+        text = f"  [{label}] arXiv:{self.reference.bare}{suffix}"
+        # The reader can only act on a warning they can actually read, so the
+        # text goes in rather than a count of them.
+        for warning in self.warnings[:5]:
+            text += f"\n      warning: {warning}"
+        if len(self.warnings) > 5:
+            text += f"\n      ... and {len(self.warnings) - 5} more warnings"
+        return text
+
+
 @dataclass
 class Outcome:
     """What the worker decided about one message."""
@@ -42,6 +79,19 @@ class Outcome:
 
     def __str__(self) -> str:  # pragma: no cover - logging convenience
         return f"{self.action}: {self.detail}" if self.detail else self.action
+
+    @classmethod
+    def summarise(cls, items: list[Item]) -> "Outcome":
+        """One message may carry several papers; report them as a whole."""
+        if len(items) == 1:
+            return cls(items[0].status, items[0].detail or str(items[0].reference))
+        tally: dict[str, int] = {}
+        for item in items:
+            tally[item.status] = tally.get(item.status, 0) + 1
+        return cls(
+            "batch",
+            ", ".join(f"{count} {status}" for status, count in tally.items()),
+        )
 
 
 class Worker:
@@ -95,7 +145,12 @@ class Worker:
             return outcomes
 
     def handle(self, message: IncomingMessage) -> Outcome:
-        """Deal with one message and mark it read once it is settled."""
+        """Deal with one message and mark it read once it is settled.
+
+        A message may name several papers; each is converted and delivered on
+        its own, and the sender gets one reply covering the lot rather than an
+        inbox full of confirmations.
+        """
         if not self.config.allows(message.sender):
             # Left unread deliberately: an unknown sender is not this worker's
             # mail, and silently consuming it would hide it from the human.
@@ -106,86 +161,100 @@ class Worker:
                 )
             return Outcome("ignored", f"sender not allowed: {message.sender}")
 
-        reference = find_in_text(message.searchable)
-        if reference is None:
+        references = find_all_in_text(message.searchable)
+        if not references:
             self._reply(
                 message,
                 "No arXiv link found",
                 "I could not find an arXiv link or id in that message.\n\n"
-                "Send something like https://arxiv.org/abs/1706.03762 "
-                "in the subject or the body.",
+                "Send something like https://arxiv.org/abs/1706.03762 in the "
+                "subject or the body. Several links in one message is fine.",
             )
             self._settle(message)
             return Outcome("no-reference")
 
+        # A forwarded newsletter can carry dozens of links; converting all of
+        # them unprompted would flood the Kindle and the mail server.
+        dropped: list[ArxivId] = []
+        if len(references) > self.config.max_links_per_email:
+            dropped = references[self.config.max_links_per_email :]
+            references = references[: self.config.max_links_per_email]
+
+        log.info(
+            "message %s references %d paper(s)", message.uid, len(references)
+        )
+        items = [self._process(reference) for reference in references]
+
+        self._reply(message, *self._summary(items, dropped))
+        self._settle(message)
+        return Outcome.summarise(items)
+
+    def _process(self, reference: ArxivId) -> Item:
+        """Convert and deliver one paper, reporting rather than raising."""
         existing = self._already_converted(reference)
         if existing is not None:
-            self._reply(
-                message,
-                f"Already sent: {reference.bare}",
-                f'"{existing.stem}" was converted and sent previously.\n\n'
-                "Delete it from the output folder if you want it rebuilt.",
-            )
-            self._settle(message)
-            return Outcome("duplicate", str(reference))
+            return Item(reference, "duplicate", existing.stem)
 
         try:
             result = self._convert(reference)
         except NoHtmlAvailable as exc:
-            self._reply(
-                message,
-                f"Could not convert {reference.bare}",
-                f"{exc}\n\nThis usually means neither arXiv nor ar5iv has an "
-                "HTML rendering of the paper, which is common for older "
-                "submissions.",
+            log.warning("no HTML rendering for %s: %s", reference, exc)
+            return Item(
+                reference,
+                "unconvertible",
+                "neither arXiv nor ar5iv has an HTML rendering",
             )
-            self._settle(message)
-            return Outcome("unconvertible", str(reference))
         except Exception as exc:  # noqa: BLE001 - report, do not retry forever
             log.exception("conversion of %s failed", reference)
-            self._reply(
-                message,
-                f"Could not convert {reference.bare}",
-                f"The conversion failed: {exc}",
-            )
-            self._settle(message)
-            return Outcome("failed", f"{reference}: {exc}")
+            return Item(reference, "failed", str(exc))
 
         size_mb = result.size_bytes / MEGABYTE
-        if size_mb > self.config.max_attachment_mb:
-            self._reply(
-                message,
-                f"Too large to send: {reference.bare}",
-                f"The EPUB came to {size_mb:.1f} MB, over the "
-                f"{self.config.max_attachment_mb:g} MB limit. It is on the "
-                f"server at {result.path}.",
-            )
-            self._settle(message)
-            return Outcome("too-large", f"{size_mb:.1f} MB")
-
         title = result.book.metadata.title
-        self.mailbox.send(
-            to=self.config.kindle_email,
-            subject=title,
-            body=" ",
-            attachment=result.path,
-        )
-        log.info("delivered %r to %s", title, self.config.kindle_email)
-
-        note = ""
-        if result.warnings:
-            note = "\n\nConverted with warnings:\n" + "\n".join(
-                f"  - {warning}" for warning in result.warnings[:10]
+        if size_mb > self.config.max_attachment_mb:
+            return Item(
+                reference,
+                "too-large",
+                f"{size_mb:.1f} MB, left on the server at {result.path}",
             )
-        self._reply(
-            message,
-            f"Sent: {title}",
-            f'"{title}"\n{result.book.metadata.author_line}\n'
-            f"arXiv:{result.book.metadata.arxiv_id.versioned}\n\n"
-            f"Sent to {self.config.kindle_email} ({size_mb:.1f} MB).{note}",
-        )
-        self._settle(message)
-        return Outcome("sent", title)
+
+        try:
+            self.mailbox.send(
+                to=self.config.kindle_email,
+                subject=title,
+                body=" ",
+                attachment=result.path,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception("could not deliver %s", reference)
+            return Item(reference, "failed", f"delivery failed: {exc}")
+
+        log.info("delivered %r to %s", title, self.config.kindle_email)
+        return Item(reference, "sent", title, warnings=list(result.warnings))
+
+    def _summary(
+        self, items: list[Item], dropped: list[ArxivId]
+    ) -> tuple[str, str]:
+        """Compose the single reply that covers everything in one message."""
+        sent = [item for item in items if item.status == "sent"]
+        if len(items) == 1:
+            item = items[0]
+            trailer = item.detail if item.status == "sent" else item.reference.bare
+            subject = f"{item.heading}: {trailer}"
+        else:
+            subject = f"{len(sent)} of {len(items)} papers sent to your Kindle"
+
+        lines = [item.line() for item in items]
+        body = "\n".join(lines)
+        if sent:
+            body += f"\n\nDelivered to {self.config.kindle_email}."
+        if dropped:
+            body += (
+                f"\n\n{len(dropped)} further link(s) in that message were not "
+                f"converted, over the {self.config.max_links_per_email}-per-message "
+                "limit:\n"
+                + "\n".join(f"  arXiv:{reference.bare}" for reference in dropped)
+            )
+        return subject, body
 
     # ---------------------------------------------------------------- pieces
 
@@ -216,7 +285,12 @@ class Worker:
 
     def _reply(self, message: IncomingMessage, subject: str, body: str) -> None:
         try:
-            self.mailbox.send(to=message.sender, subject=subject, body=body)
+            self.mailbox.send(
+                to=message.sender,
+                subject=subject,
+                body=body,
+                in_reply_to=message.message_id,
+            )
         except Exception as exc:  # noqa: BLE001 - a failed reply is not fatal
             log.error("could not reply to %s: %s", message.sender, exc)
 

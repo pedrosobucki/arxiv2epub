@@ -67,6 +67,14 @@ Send that mailbox an email with an arXiv link in the subject or the body and
 the paper turns up on your Kindle. You get a reply either way — what was sent,
 that you had already sent it, or why it could not be converted.
 
+**Several links in one email is fine.** Each paper is converted and delivered
+separately, in the order you wrote them, and you get a single reply covering
+the lot rather than one per paper. A paper named twice is converted once, and
+one failure does not stop the others. A message is capped at
+`MAX_LINKS_PER_EMAIL` papers (10 by default) so a forwarded digest cannot flood
+your Kindle; anything over the cap is listed in the reply rather than dropped
+silently.
+
 It reads the **same `.env` as the previous arxiv2kindle worker**, variable for
 variable. `CHROME_PATH` is accepted and ignored, since this version renders
 from arXiv's HTML instead of driving a headless browser; leaving it in place
@@ -83,7 +91,14 @@ does no harm.
 | `CHROME_PATH` | Ignored; kept so an inherited `.env` still validates. |
 
 Optional, all with working defaults: `MATH_FORMAT`, `MAX_ATTACHMENT_MB`,
-`MAILBOX`, `OUTPUT_DIR`, `CACHE_DIR`, `DRY_RUN`, `SMTP_ALLOW_CLEARTEXT`, `TZ`.
+`MAX_LINKS_PER_EMAIL`, `MAILBOX`, `OUTPUT_DIR`, `CACHE_DIR`, `DRY_RUN`,
+`SMTP_ALLOW_CLEARTEXT`, `TZ`.
+
+Replies are threaded onto the message that asked for them (`In-Reply-To`,
+`References`, `Auto-Submitted`), which is what keeps them out of spam — an
+unsolicited note from a young domain gets filed, a reply to your own thread
+does not. If one does land in spam, mark it "not spam" once; that teaches the
+filter far faster than any header will.
 
 Check the configuration without touching the network, or drain the inbox once
 and exit:

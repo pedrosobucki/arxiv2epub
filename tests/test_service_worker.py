@@ -22,6 +22,7 @@ class SentMail:
     subject: str
     body: str
     attachment: Path | None
+    in_reply_to: str = ""
 
 
 @dataclass
@@ -41,8 +42,8 @@ class FakeMailbox:
     def mark_seen(self, uid: int) -> None:
         self.seen.append(uid)
 
-    def send(self, *, to, subject, body, attachment=None) -> None:
-        self.sent.append(SentMail(to, subject, body, attachment))
+    def send(self, *, to, subject, body, attachment=None, in_reply_to="") -> None:
+        self.sent.append(SentMail(to, subject, body, attachment, in_reply_to))
 
     def to_kindle(self) -> list[SentMail]:
         return [mail for mail in self.sent if mail.attachment is not None]
@@ -64,8 +65,13 @@ def config(tmp_path) -> ServiceConfig:
     )
 
 
-def message(body: str = "", *, sender: str = "me@example.com", subject: str = "") -> IncomingMessage:
-    return IncomingMessage(uid=7, sender=sender, subject=subject, body=body)
+def message(
+    body: str = "", *, sender: str = "me@example.com", subject: str = ""
+) -> IncomingMessage:
+    return IncomingMessage(
+        uid=7, sender=sender, subject=subject, body=body,
+        message_id="<original@example.com>",
+    )
 
 
 def _epub(path: Path) -> Path:
@@ -229,7 +235,7 @@ def test_one_bad_message_does_not_block_the_next(config, paper_metadata) -> None
 
 def test_a_failure_to_reply_does_not_lose_the_delivery(config, paper_metadata) -> None:
     class BrokenReply(FakeMailbox):
-        def send(self, *, to, subject, body, attachment=None):
+        def send(self, *, to, subject, body, attachment=None, in_reply_to=""):
             if attachment is None:
                 raise ConnectionError("smtp refused the confirmation")
             super().send(to=to, subject=subject, body=body, attachment=attachment)
@@ -302,3 +308,117 @@ def test_outside_a_session_each_call_still_stands_alone(config) -> None:
     # The session must not leak a connection or leave pooling switched on.
     assert not mailbox._pooled
     assert mailbox._imap_conn is None
+
+
+# ------------------------------------------------------ several papers at once
+
+
+def test_every_link_in_one_message_is_converted(config, paper_metadata) -> None:
+    mailbox = FakeMailbox([message(
+        "read https://arxiv.org/abs/1706.03762 and arXiv:2301.08243 "
+        "and https://arxiv.org/abs/2501.12948"
+    )])
+
+    outcome = _worker(config, mailbox, converter(paper_metadata)).poll()[0]
+
+    assert outcome.action == "batch"
+    assert len(mailbox.to_kindle()) == 3
+
+
+def test_several_papers_produce_one_reply_not_several(config, paper_metadata) -> None:
+    mailbox = FakeMailbox([message(
+        "https://arxiv.org/abs/1706.03762 https://arxiv.org/abs/2301.08243"
+    )])
+
+    _worker(config, mailbox, converter(paper_metadata)).poll()
+
+    replies = [m for m in mailbox.sent if m.attachment is None]
+    assert len(replies) == 1
+    assert "2 of 2" in replies[0].subject
+    assert "arXiv:1706.03762" in replies[0].body
+    assert "arXiv:2301.08243" in replies[0].body
+
+
+def test_papers_are_converted_in_the_order_they_were_written(
+    config, paper_metadata
+) -> None:
+    mailbox = FakeMailbox([message(
+        "https://arxiv.org/abs/2501.12948 then https://arxiv.org/abs/1706.03762"
+    )])
+    _worker(config, mailbox, converter(paper_metadata)).poll()
+
+    order = [m.attachment.name for m in mailbox.to_kindle()]
+    assert "2501.12948" in order[0]
+    assert "1706.03762" in order[1]
+
+
+def test_one_failure_does_not_stop_the_rest_of_the_batch(
+    config, paper_metadata
+) -> None:
+    good = converter(paper_metadata)
+
+    def flaky(reference, output, options):
+        if "2301.08243" in reference:
+            raise RuntimeError("conversion exploded")
+        return good(reference, output, options)
+
+    mailbox = FakeMailbox([message(
+        "https://arxiv.org/abs/1706.03762 https://arxiv.org/abs/2301.08243 "
+        "https://arxiv.org/abs/2501.12948"
+    )])
+    _worker(config, mailbox, flaky).poll()
+
+    assert len(mailbox.to_kindle()) == 2
+    reply = next(m for m in mailbox.sent if m.attachment is None)
+    assert "conversion exploded" in reply.body
+    assert "1 of 3" not in reply.subject  # two succeeded
+    assert "2 of 3" in reply.subject
+
+
+def test_the_same_paper_listed_twice_is_converted_once(config, paper_metadata) -> None:
+    mailbox = FakeMailbox([message(
+        "https://arxiv.org/abs/1706.03762 aka arXiv:1706.03762"
+    )])
+    _worker(config, mailbox, converter(paper_metadata)).poll()
+    assert len(mailbox.to_kindle()) == 1
+
+
+def test_a_forwarded_digest_is_capped_and_the_rest_reported(
+    config, paper_metadata
+) -> None:
+    from dataclasses import replace
+
+    config = replace(config, max_links_per_email=2)
+    links = " ".join(
+        f"https://arxiv.org/abs/24{month:02d}.0100{n}"
+        for n, month in enumerate((1, 2, 3, 4, 5), start=1)
+    )
+    mailbox = FakeMailbox([message(links)])
+
+    _worker(config, mailbox, converter(paper_metadata)).poll()
+
+    assert len(mailbox.to_kindle()) == 2
+    reply = next(m for m in mailbox.sent if m.attachment is None)
+    assert "3 further link(s)" in reply.body
+
+
+# ---------------------------------------------------------------- deliverability
+
+
+def test_the_reply_threads_onto_the_message_that_asked_for_it(
+    config, paper_metadata
+) -> None:
+    # An unsolicited note from a young domain gets filed as spam; a reply to a
+    # thread the recipient started does not.
+    mailbox = FakeMailbox([message("arXiv:1706.03762")])
+    _worker(config, mailbox, converter(paper_metadata)).poll()
+
+    reply = next(m for m in mailbox.sent if m.attachment is None)
+    assert reply.in_reply_to == "<original@example.com>"
+
+
+def test_the_kindle_delivery_is_not_threaded(config, paper_metadata) -> None:
+    # Amazon's ingest is not a conversation; only the human reply is threaded.
+    mailbox = FakeMailbox([message("arXiv:1706.03762")])
+    _worker(config, mailbox, converter(paper_metadata)).poll()
+    assert mailbox.to_kindle()[0].in_reply_to == ""
