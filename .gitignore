@@ -10,3 +10,5 @@ out/
 cache/
 *.epub
 .env
+.env.*
+!.env.example

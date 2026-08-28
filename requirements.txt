@@ -4,3 +4,5 @@ beautifulsoup4>=4.12
 Pillow>=10.0
 ziamath>=0.13
 cairosvg>=2.7
+imapclient>=3.0
+python-dotenv>=1.0

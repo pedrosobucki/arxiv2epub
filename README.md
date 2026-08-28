@@ -52,6 +52,73 @@ Maths is drawn by [ziamath](https://ziamath.readthedocs.io), which renders
 MathML using glyph outlines from STIX Two Math. The resulting SVG carries no
 font dependency, so it looks the same on every device.
 
+## The mail-in worker
+
+The other half of this is a service you leave running: it watches a mailbox for
+arXiv links, converts whatever arrives, and mails the EPUB to your Kindle.
+
+```console
+cp .env.example .env    # then fill it in
+docker compose up -d worker
+docker compose logs -f worker
+```
+
+Send that mailbox an email with an arXiv link in the subject or the body and
+the paper turns up on your Kindle. You get a reply either way — what was sent,
+that you had already sent it, or why it could not be converted.
+
+It reads the **same `.env` as the previous arxiv2kindle worker**, variable for
+variable. `CHROME_PATH` is accepted and ignored, since this version renders
+from arXiv's HTML instead of driving a headless browser; leaving it in place
+does no harm.
+
+| Variable | Meaning |
+| --- | --- |
+| `EMAIL_USER` / `EMAIL_PASSWORD` | The mailbox to watch, and to send from. |
+| `EMAIL_IMAP_HOST` / `EMAIL_IMAP_PORT` | Inbox, over TLS. Default port 993. |
+| `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` | Outgoing. 465 is implicit TLS, anything else uses STARTTLS. |
+| `KINDLE_EMAIL` | Where the EPUB is delivered. |
+| `ALLOWED_SENDERS` | Comma-separated. Anything else is left untouched. |
+| `POLL_INTERVAL_MS` | Inbox check interval, in milliseconds. |
+| `CHROME_PATH` | Ignored; kept so an inherited `.env` still validates. |
+
+Optional, all with working defaults: `MATH_FORMAT`, `MAX_ATTACHMENT_MB`,
+`MAILBOX`, `OUTPUT_DIR`, `CACHE_DIR`, `DRY_RUN`, `SMTP_ALLOW_CLEARTEXT`, `TZ`.
+
+Check the configuration without touching the network, or drain the inbox once
+and exit:
+
+```console
+docker compose run --rm worker --check
+docker compose run --rm worker --once
+```
+
+**Amazon has to be told to accept the mail.** Add `EMAIL_USER` to your Approved
+Personal Document E-mail List under *Manage Your Content and Devices → Preferences
+→ Personal Document Settings*, or Amazon silently drops everything the worker sends.
+
+### How it behaves when things go wrong
+
+It runs unattended, so the failure paths are the design:
+
+- **Nothing is marked read until it has been answered.** Mail is fetched with
+  `BODY.PEEK[]`, so a crash mid-conversion leaves the request to be retried
+  rather than swallowing it — the failure mode the previous worker had, which
+  marked everything read at fetch time.
+- **Mail from an unknown sender is left unread**, not consumed, so you still
+  see it. It is logged once per run rather than on every pass.
+- **Every handled message gets a reply**, including failures. A paper neither
+  provider can convert produces an explanation, not silence.
+- **A duplicate is recognised** by the arXiv id already present in the output
+  folder, and answered without sending a second copy.
+- **Oversized books are not mailed.** The file stays on the server and the
+  reply says where.
+- **A password is never sent over an unencrypted connection.** If the SMTP
+  server offers no STARTTLS the worker refuses and says so; set
+  `SMTP_ALLOW_CLEARTEXT=true` only for a relay on your own network.
+- An unreachable mail server is logged and retried on the next pass; one bad
+  message never blocks the next.
+
 ## Usage
 
 ```console
@@ -81,9 +148,12 @@ one is used and recorded in the filename and metadata.
 
 ### Docker
 
+`docker compose up -d` starts the worker and nothing else; the one-shot CLI
+services sit behind a `tools` profile.
+
 ```console
 docker compose build
-docker compose run --rm arxiv2epub --cache /cache -o /out 1706.03762
+docker compose run --rm cli --cache /cache -o /out 1706.03762
 ```
 
 Output lands in `./out`, downloads are cached in `./cache`. The `samples`
@@ -121,9 +191,9 @@ result = build_epub("1706.03762", "out/", Options(math_format="inline-svg"))
 print(result.path, result.warnings)
 ```
 
-`build_epub` is the seam the planned mail-in/send-to-Kindle service will sit on:
-it takes a reference, writes a file, and reports what went wrong without
-raising for recoverable problems like one missing figure.
+`build_epub` is the seam the mail-in worker sits on: it takes a reference,
+writes a file, and reports what went wrong without raising for recoverable
+problems like one missing figure.
 
 ## Limitations
 

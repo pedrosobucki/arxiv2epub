@@ -16,6 +16,8 @@ dependencies = [
     "Pillow>=10.0",
     "ziamath>=0.13",
     "cairosvg>=2.7",
+    "imapclient>=3.0",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +25,7 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 arxiv2epub = "arxiv2epub.cli:main"
+arxiv2epub-worker = "arxiv2epub.service.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
