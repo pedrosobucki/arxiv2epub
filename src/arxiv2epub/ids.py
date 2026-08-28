@@ -5,11 +5,23 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-# Post-2007 identifiers: 0704.0001, 1706.03762, 2501.12948 (4 or 5 digit sequence).
-_MODERN = re.compile(r"(?P<num>\d{4}\.\d{4,5})(?:v(?P<ver>\d+))?")
+# Post-2007 identifiers: 0704.0001, 1706.03762, 2501.12948. The first four
+# digits are YYMM, so requiring a real month keeps things like a "2024.0315"
+# build number in an email from being mistaken for a paper.
+_MODERN = re.compile(r"(?P<num>\d{2}(?:0[1-9]|1[0-2])\.\d{4,5})(?:v(?P<ver>\d+))?")
 # Pre-2007 identifiers: math.GT/0309136, hep-th/9901001.
 _LEGACY = re.compile(
     r"(?P<num>[a-z][a-z-]*(?:\.[A-Z]{2})?/\d{7})(?:v(?P<ver>\d+))?", re.IGNORECASE
+)
+
+
+# Ordered from most to least certain. A bare "2024.0315" in an email footer
+# looks exactly like an arXiv id, so an explicit URL or "arXiv:" prefix is
+# trusted first and the bare form is only a last resort.
+_QUALIFIED = (
+    re.compile(r"ar(?:xiv|5iv)[^\s]*?/(?:abs|html|pdf)/([^\s<>\"')\]]+)", re.IGNORECASE),
+    re.compile(r"arxiv[:\s]\s*([^\s<>\"')\]]+)", re.IGNORECASE),
+    re.compile(r"10\.48550/arxiv\.([^\s<>\"')\]]+)", re.IGNORECASE),
 )
 
 
@@ -71,3 +83,24 @@ def parse(reference: str) -> ArxivId:
             return ArxivId(match.group("num"), int(version) if version else None)
 
     raise NotAnArxivReference(f"could not find an arXiv id in {reference!r}")
+
+
+def find_in_text(text: str) -> ArxivId | None:
+    """Pick an arXiv reference out of free-form prose, or return None.
+
+    Used on incoming mail, where the id is surrounded by whatever the sender
+    (or their mail client) wrapped around it.
+    """
+    if not text:
+        return None
+
+    for pattern in _QUALIFIED:
+        for match in pattern.finditer(text):
+            try:
+                return parse(match.group(1))
+            except NotAnArxivReference:
+                continue
+    try:
+        return parse(text)
+    except NotAnArxivReference:
+        return None
