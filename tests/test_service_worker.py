@@ -254,3 +254,51 @@ def test_a_stranger_is_only_logged_once(config, paper_metadata, caplog) -> None:
 
     assert sum("ignoring message" in r.message for r in caplog.records) == 1
     assert mailbox.seen == []
+
+
+def test_a_whole_pass_costs_one_login(config, paper_metadata, monkeypatch) -> None:
+    """Providers throttle accounts that reconnect per message; a pass is one
+    session, however much mail it finds."""
+    from arxiv2epub.service.mailbox import Mailbox
+
+    imap_logins = 0
+
+    class FakeIMAP:
+        def select_folder(self, name): pass
+        def search(self, criteria): return [11, 12]
+        def fetch(self, uids, parts):
+            body = (
+                b"From: me@example.com\r\nSubject: p\r\n\r\n"
+                b"https://arxiv.org/abs/1706.03762\r\n"
+            )
+            return {uid: {b"BODY[]": body} for uid in uids}
+        def add_flags(self, uids, flags): pass
+        def logout(self): pass
+
+    mailbox = Mailbox(config)
+
+    def connect():
+        nonlocal imap_logins
+        imap_logins += 1
+        return FakeIMAP()
+
+    monkeypatch.setattr(mailbox, "_connect_imap", connect)
+    monkeypatch.setattr(mailbox, "_connect_smtp", lambda: pytest.fail("unused"))
+    monkeypatch.setattr(mailbox, "send", lambda **kw: None)
+
+    Worker(config, mailbox=mailbox, convert=converter(paper_metadata)).poll()
+
+    # Without pooling this would be 1 fetch + 2 mark_seen = 3.
+    assert imap_logins == 1
+
+
+def test_outside_a_session_each_call_still_stands_alone(config) -> None:
+    from arxiv2epub.service.mailbox import Mailbox
+
+    mailbox = Mailbox(config)
+    assert mailbox._imap_conn is None
+    with mailbox.session():
+        assert mailbox._pooled
+    # The session must not leak a connection or leave pooling switched on.
+    assert not mailbox._pooled
+    assert mailbox._imap_conn is None

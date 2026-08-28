@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import signal
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,12 @@ from .mailbox import IncomingMessage, Mailbox
 log = logging.getLogger(__name__)
 
 MEGABYTE = 1024 * 1024
+
+
+@contextmanager
+def _nothing():
+    """Stand-in for a mailbox that does not pool connections."""
+    yield
 
 
 @dataclass
@@ -57,28 +64,35 @@ class Worker:
     # ------------------------------------------------------------- one pass
 
     def poll(self) -> list[Outcome]:
-        """Process everything currently unread. Never raises."""
-        try:
-            messages = self.mailbox.fetch_unseen()
-        except Exception as exc:  # noqa: BLE001 - the loop must survive the network
-            log.error("could not read the inbox: %s", exc)
-            log.debug("inbox failure", exc_info=True)
-            return []
+        """Process everything currently unread. Never raises.
 
-        if not messages:
-            return []
-
-        log.info("%d unread message(s)", len(messages))
-        outcomes: list[Outcome] = []
-        for message in messages:
+        The whole pass runs inside one mail session, so a busy inbox costs one
+        login rather than one per message -- providers throttle accounts that
+        reconnect constantly.
+        """
+        session = getattr(self.mailbox, "session", None)
+        with session() if session else _nothing():
             try:
-                outcome = self.handle(message)
-            except Exception as exc:  # noqa: BLE001 - one bad message is not fatal
-                log.exception("unhandled error on message %s", message.uid)
-                outcome = Outcome("error", str(exc))
-            outcomes.append(outcome)
-            log.info("message %s -> %s", message.uid, outcome)
-        return outcomes
+                messages = self.mailbox.fetch_unseen()
+            except Exception as exc:  # noqa: BLE001 - the loop survives the network
+                log.error("could not read the inbox: %s", exc)
+                log.debug("inbox failure", exc_info=True)
+                return []
+
+            if not messages:
+                return []
+
+            log.info("%d unread message(s)", len(messages))
+            outcomes: list[Outcome] = []
+            for message in messages:
+                try:
+                    outcome = self.handle(message)
+                except Exception as exc:  # noqa: BLE001 - one bad message is not fatal
+                    log.exception("unhandled error on message %s", message.uid)
+                    outcome = Outcome("error", str(exc))
+                outcomes.append(outcome)
+                log.info("message %s -> %s", message.uid, outcome)
+            return outcomes
 
     def handle(self, message: IncomingMessage) -> Outcome:
         """Deal with one message and mark it read once it is settled."""

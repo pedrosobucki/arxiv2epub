@@ -90,9 +90,25 @@ class Mailbox:
         # Overridable so a server with a private CA (or a test double) can be
         # reached without loosening anything by default.
         self.ssl_context = ssl_context
+        self._pooled = False
+        self._imap_conn: IMAPClient | None = None
+        self._smtp_conn: smtplib.SMTP | None = None
 
+    # Providers throttle accounts that reconnect constantly, and Zoho is
+    # stricter than most. Holding one connection open for a whole pass turns
+    # "one login per message" into "one login per pass".
     @contextmanager
-    def _imap(self) -> Iterator[IMAPClient]:
+    def session(self) -> Iterator["Mailbox"]:
+        """Reuse one IMAP and one SMTP connection for everything inside."""
+        self._pooled = True
+        try:
+            yield self
+        finally:
+            self._pooled = False
+            self._drop_imap()
+            self._drop_smtp()
+
+    def _connect_imap(self) -> IMAPClient:
         client = IMAPClient(
             host=self.config.imap_host,
             port=self.config.imap_port,
@@ -100,14 +116,38 @@ class Mailbox:
             ssl_context=self.ssl_context,
             timeout=NETWORK_TIMEOUT_SECONDS,
         )
+        client.login(self.config.email_user, self.config.email_password)
+        return client
+
+    def _drop_imap(self) -> None:
+        client, self._imap_conn = self._imap_conn, None
+        if client is None:
+            return
         try:
-            client.login(self.config.email_user, self.config.email_password)
-            yield client
-        finally:
+            client.logout()
+        except Exception:  # noqa: BLE001 - a failed logout must not mask work
+            log.debug("IMAP logout failed", exc_info=True)
+
+    @contextmanager
+    def _imap(self) -> Iterator[IMAPClient]:
+        if not self._pooled:
+            client = self._connect_imap()
             try:
-                client.logout()
-            except Exception:  # noqa: BLE001 - a failed logout must not mask work
-                log.debug("IMAP logout failed", exc_info=True)
+                yield client
+            finally:
+                self._imap_conn = client
+                self._drop_imap()
+            return
+
+        if self._imap_conn is None:
+            self._imap_conn = self._connect_imap()
+        try:
+            yield self._imap_conn
+        except Exception:
+            # A pooled connection that has errored may be unusable; drop it so
+            # the next call starts clean rather than compounding the failure.
+            self._drop_imap()
+            raise
 
     def fetch_unseen(self) -> list[IncomingMessage]:
         """Return unread messages, leaving them unread."""
@@ -146,8 +186,35 @@ class Mailbox:
 
     # ------------------------------------------------------------------ SMTP
 
+    def _drop_smtp(self) -> None:
+        server, self._smtp_conn = self._smtp_conn, None
+        if server is None:
+            return
+        try:
+            server.quit()
+        except Exception:  # noqa: BLE001
+            log.debug("SMTP quit failed", exc_info=True)
+
     @contextmanager
     def _smtp(self) -> Iterator[smtplib.SMTP]:
+        if self._pooled:
+            if self._smtp_conn is None:
+                self._smtp_conn = self._connect_smtp()
+            try:
+                yield self._smtp_conn
+            except Exception:
+                self._drop_smtp()
+                raise
+            return
+
+        server = self._connect_smtp()
+        try:
+            yield server
+        finally:
+            self._smtp_conn = server
+            self._drop_smtp()
+
+    def _connect_smtp(self) -> smtplib.SMTP:
         if self.config.smtp_use_ssl:
             server: smtplib.SMTP = smtplib.SMTP_SSL(
                 self.config.smtp_host,
@@ -161,17 +228,11 @@ class Mailbox:
                 self.config.smtp_port,
                 timeout=NETWORK_TIMEOUT_SECONDS,
             )
-        try:
-            server.ehlo()
-            if not self.config.smtp_use_ssl:
-                self._upgrade(server)
-            server.login(self.config.email_user, self.config.email_password)
-            yield server
-        finally:
-            try:
-                server.quit()
-            except Exception:  # noqa: BLE001
-                log.debug("SMTP quit failed", exc_info=True)
+        server.ehlo()
+        if not self.config.smtp_use_ssl:
+            self._upgrade(server)
+        server.login(self.config.email_user, self.config.email_password)
+        return server
 
     def _upgrade(self, server: smtplib.SMTP) -> None:
         """Encrypt the session before the password goes over it.
